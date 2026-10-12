@@ -1,0 +1,10 @@
+# Terraform state files
+*.tfstate
+*.tfstate.backup
+.terraform/
+__pycache__/
+*.pyc
+.env
+*.db
+.DS_Store
+~$*

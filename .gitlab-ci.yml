@@ -1,0 +1,72 @@
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  IMAGE_NAME: "uiaam/swap-flask-app"
+  IMAGE_TAG: "latest"
+  DOCKER_DRIVER: overlay2
+
+# ----------------------------
+# Build Docker image
+# ----------------------------
+build:
+  stage: build
+  image: docker:20.10.16
+  services:
+    - name: docker:20.10.16-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - echo "Waiting for Docker daemon..."
+    - until docker info >/dev/null 2>&1; do sleep 2; done
+    - echo "Logging in to Docker Hub"
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+    - echo "Build Docker image"
+    - docker build -t $IMAGE_NAME:$IMAGE_TAG -f swap_app/Dockerfile swap_app
+    - echo "Push Docker image"
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+  only:
+    - main
+
+# ----------------------------
+# Test avec pytest
+# ----------------------------
+test:
+  stage: test
+  image: python:3.9
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r swap_app/requirements.txt
+    - pip install pytest
+    # Ajouter le dossier swap_app au PYTHONPATH pour les imports
+    - export PYTHONPATH="$CI_PROJECT_DIR/swap_app:$PYTHONPATH"
+  script:
+    - pytest tests --maxfail=1 --disable-warnings -q
+  only:
+    - main
+
+# ----------------------------
+# Deploy sur Kubernetes
+# ----------------------------
+deploy:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  needs: [build, test]
+  script:
+    - echo "Setup kubeconfig"
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT" > ~/.kube/config
+    - export KUBECONFIG=~/.kube/config
+    - echo "Test cluster connection"
+    - kubectl get nodes
+    - echo "Deploy app"
+    - kubectl apply -f kubernetes/deployment.yaml
+    - kubectl apply -f kubernetes/service.yaml
+    - kubectl rollout restart deployment swap-flask-app
+  only:
+    - main
